@@ -64,8 +64,14 @@ router.post("/benchmark", async (req: Request, res: Response) => {
     const rawResponse = await callLLM(prompt);
     console.log(`[Benchmark] LLM responded: ${rawResponse.length} chars`);
 
-    // Step 5: Validate output
-    const result = validateBenchmarkOutput(rawResponse);
+    // Step 5: Validate output (with retry — if validation fails, re-call LLM with error feedback)
+    const result = await validateBenchmarkOutput(rawResponse, async (errorFeedback) => {
+      console.warn(`[Benchmark] Validation failed, retrying with feedback: ${errorFeedback}`);
+      return callLLM({
+        systemPrompt: prompt.systemPrompt,
+        userPrompt: `${prompt.userPrompt}\n\nIMPORTANT CORRECTION: ${errorFeedback}`,
+      });
+    });
     console.log(
       `[Benchmark] Validated: ${result.alignmentScore}% alignment, ${result.deviations.length} deviations`
     );

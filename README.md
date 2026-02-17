@@ -1,175 +1,184 @@
-# CASUS — Reverse-Engineered Architecture & Benchmark Demo
+# AI Contract Benchmark
 
-Technical interview preparation for **CASUS Technologies AG** (Zurich, Switzerland).  
-Reverse-engineered from CTO interview, website, blog, and security page — Feb 2026.
+Full-stack application that benchmarks legal contracts against predefined clause standards using LLM analysis. Upload a contract, select a playbook (set of standard clauses), and get a clause-by-clause deviation report with severity ratings and suggested fixes.
 
----
+## Architecture
 
-## What is CASUS?
+```
+┌──────────────────┐     ┌──────────────────────────────────────────┐
+│  Frontend        │     │  Backend (Node.js + TypeScript)          │
+│  React + Vite    │────▶│                                          │
+│  :5173           │     │  Request ──▶ Prompt ──▶ LLM ──▶ Validate │
+└──────────────────┘     │  (Zod)      Engine    (OpenAI)   (Zod)   │
+                         └──────────────────────────────────────────┘
+┌──────────────────┐                    │
+│  Word Add-in     │────────────────────┘
+│  React+Office.js │  (same API)
+│  :3000 (HTTPS)   │
+└──────────────────┘
+```
 
-CASUS is a Swiss legal-tech startup that builds **AI-powered contract analysis** tools for law firms and in-house legal teams in the DACH region (Germany, Austria, Switzerland).
-
-**Key facts:**
-- Founded 2019, UZH spin-off, Zurich
-- Originally built a contract automation tool (CASUS Create) — sold to LAWLIFT in 2025
-- Rebuilt from scratch as an AI contract analysis platform
-- Two clients: **Web App** (React) + **Word Add-in** (React + Office.js)
-- Differentiator: applies changes directly in Word with **Track Changes** (redlining) — something Microsoft Copilot cannot do
-
-## Tech Stack (Confirmed)
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React + TypeScript |
-| Backend | Node.js + TypeScript |
-| Cloud | Google Cloud Platform (Switzerland region) |
-| Database | Firestore (NoSQL) |
-| Auth | Firebase Authentication |
-| AI Inference | Azure OpenAI (EU region) — GPT-4o / GPT-4 Turbo |
-| Word Add-in | React + Office.js (Taskpane) |
-| Validation | Zod (JSON schema validation for LLM output) |
-
-**Data residency:** Storage in Switzerland (GCP), inference in EU (Azure). Zero data retention on Azure side. Microsoft abuse monitoring disabled (attorney-client privilege).
-
-## CASUS Product Features
-
-| Feature | Description |
-|---------|-------------|
-| **AI Chat** | Conversational Q&A about an open document |
-| **Benchmark** | Compare contract clause-by-clause against a playbook/standard |
-| **Proofread** | Find definition inconsistencies, broken cross-refs, numbering errors |
-| **Review** | Identify and classify legal risks by severity |
-| **Legal Research** | General legal Q&A (no document required) |
-| **AI Data Room** | Bulk analysis of 10-100+ documents (M&A due diligence) |
-
----
-
-## What's in This Repo
-
-### `/backend` — Node.js + TypeScript API (Express)
-
-A working replica of the CASUS Benchmark feature backend, demonstrating how every feature follows the same pattern:
+**Every request follows the same pipeline:**
 
 ```
 Validate Input (Zod) → Fetch Playbook → Build Prompt → Call LLM → Validate Output (Zod) → Return
 ```
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Express server entry point |
-| `src/routes/benchmark.ts` | POST `/api/benchmark` — the core endpoint |
-| `src/services/promptEngine.ts` | Builds system + user prompts per feature |
-| `src/services/llm.ts` | Calls OpenAI (or returns mock data) + output validation |
-| `src/services/playbooks.ts` | NDA Standard + Service Agreement playbooks |
-| `src/types/index.ts` | Zod schemas for request AND LLM output validation |
+## Tech Stack
 
-**Run it:**
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Frontend | React 19, TypeScript, Vite | Document upload, results UI |
+| Backend | Node.js, Express 5, TypeScript | API, prompt engineering, validation |
+| LLM | OpenAI API (gpt-4o-mini / gpt-4o) | Contract analysis |
+| Validation | Zod | Input request + LLM output schema enforcement |
+| Word Add-in | React, Office.js, Vite (HTTPS) | In-document analysis via taskpane |
+| Document Parsing | mammoth.js | Client-side .docx text extraction |
+
+## Project Structure
+
+```
+├── backend/                    # Express API server
+│   └── src/
+│       ├── index.ts            # Server entry, CORS, routes
+│       ├── routes/
+│       │   └── benchmark.ts    # POST /api/benchmark, GET /api/playbooks
+│       ├── services/
+│       │   ├── promptEngine.ts # Builds system + user prompts for LLM
+│       │   ├── llm.ts          # OpenAI calls, retry logic, output validation
+│       │   └── playbooks.ts    # Clause standards (NDA, MSA)
+│       └── types/
+│           └── index.ts        # Zod schemas for request & response
+├── frontend/                   # React web application
+│   └── src/
+│       ├── App.tsx             # Document upload (drag-drop + paste) + layout
+│       ├── components/
+│       │   ├── BenchmarkPanel.tsx    # Playbook selector + run button
+│       │   └── BenchmarkResults.tsx  # Score, deviations, suggested fixes
+│       └── types.ts            # Shared TypeScript interfaces
+├── word-addin/                 # Office.js Word Add-in
+│   ├── manifest.xml            # Office Add-in manifest for sideloading
+│   └── src/
+│       ├── taskpane.html       # Entry point (loads Office.js SDK from CDN)
+│       ├── main.tsx            # Office.onReady → React mount
+│       ├── taskpane.tsx        # Full taskpane: read doc, benchmark, apply fixes
+│       └── taskpane.css        # Taskpane styles
+└── officejs-example/
+    └── taskpane.tsx            # Reference Office.js patterns (standalone)
+```
+
+## Quick Start
+
 ```bash
+# 1. Backend
 cd backend
 npm install
-npm run dev    # starts on http://localhost:3001
-```
+cp .env.example .env            # add your OPENAI_API_KEY
+npm run dev                     # http://localhost:3001
 
-Runs in **mock mode** by default (no API key needed). Set `OPENAI_API_KEY` env var to use real OpenAI.
-
-### `/frontend` — React + TypeScript (Vite)
-
-A working UI that replicates the CASUS Benchmark experience:
-
-- Left panel: paste/edit contract text
-- Right panel: select playbook, run benchmark, view results
-- Expandable deviation cards with severity, explanation, and "Insert Fix" button
-
-| File | Purpose |
-|------|---------|
-| `src/App.tsx` | Main layout + sample NDA document |
-| `src/components/BenchmarkPanel.tsx` | Playbook selector + run button |
-| `src/components/BenchmarkResults.tsx` | Alignment score, severity breakdown, deviation cards |
-| `src/types.ts` | Shared TypeScript interfaces |
-
-**Run it:**
-```bash
+# 2. Frontend
 cd frontend
 npm install
-npm run dev    # starts on http://localhost:5173
+npm run dev                     # http://localhost:5173
+
+# 3. Word Add-in (optional, requires macOS + Word)
+cd word-addin
+npm install
+npx office-addin-dev-certs install
+npm run dev                     # https://localhost:3000
+# Copy manifest: cp manifest.xml ~/Library/Containers/com.microsoft.Word/Data/Documents/wef/
 ```
 
-### `/officejs-example` — Office.js Reference
+Without `OPENAI_API_KEY`, the backend returns mock data so the full UI flow is testable without any API costs.
 
-| File | Purpose |
-|------|---------|
-| `taskpane.tsx` | Complete example of a CASUS Word Add-in taskpane component |
+## How It Works
 
-Shows the 5 core Office.js operations CASUS uses:
-1. **Read document** — `Word.run()` + `body.load("text")` + `context.sync()`
-2. **Search & navigate** — find text, select it, scroll to it
-3. **Replace text** — `insertText(replacement, Word.InsertLocation.replace)`
-4. **Insert missing clauses** — `body.insertParagraph()` at end
-5. **Highlight with Content Controls** — wrap flagged clauses with named markers
+### 1. Playbooks (Clause Standards)
 
-> Track Changes are **automatic** — if the lawyer has it enabled in Word, any `insertText` call creates a redline (strikethrough for deletion, underline for insertion). No special API call needed.
+A playbook is a set of standard clauses that define what a "proper" contract should contain. Each clause has:
+- `title` — e.g. "Definition of Confidential Information"
+- `standardText` — the expected language
+- `importance` — critical / major / minor
 
-### `OFFICE_JS_GUIDE.md`
+Two playbooks are included: **NDA Standard** (8 clauses) and **Service Agreement MSA** (6 clauses). In production, these would be stored in a database per organization.
 
-Crash course on Office.js for someone who knows React but has never touched Office add-ins. Covers the architecture, batch operations pattern, and all the code patterns CASUS uses.
+### 2. Prompt Engine
 
-### `INTERVIEW_PREP.md`
+The prompt engine injects the playbook clauses into a structured system prompt that instructs the LLM to:
+- Compare the document clause-by-clause against each standard
+- Classify each as: `ok`, `missing`, `weaker`, `stronger`, or `different`
+- Assign severity: `critical`, `major`, `minor`, `info`
+- Quote 5-10 words from the document as a `locationHint`
+- Return strict JSON matching the Zod schema
 
-Preparation guide for the technical interview with Manuel (lead engineer):
-- 5 most likely coding exercises with solution patterns
-- Discussion questions Manuel might ask
-- Key things to demonstrate during the interview
+### 3. LLM Call + Retry
 
-### `CasysArchitecture.html`
+The LLM service includes:
+- **Exponential backoff** — 3 attempts with 1s, 2s, 4s delays on rate limits / timeouts
+- **Self-correction** — if Zod validation fails, the LLM is re-called with the validation errors appended to the prompt
+- **Mock mode** — realistic hardcoded response for development without API costs
 
-Interactive React component (standalone HTML) visualizing the full CASUS system architecture across 6 layers, with clickable feature data flows showing how each feature moves data through the stack.
+### 4. Output Validation
 
----
+Every LLM response is validated with Zod before reaching the frontend:
+- JSON parse check
+- Schema validation (alignment score range, deviation types, severity levels)
+- If validation fails: retry with error feedback to the LLM
+- If retry also fails: return structured error to the client
 
-## Architecture Overview
+### 5. Word Add-in (Office.js)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  CLIENT LAYER                                                │
-│  ┌─────────────────────┐  ┌──────────────────────────────┐  │
-│  │  Web App (React)    │  │  Word Add-in (React+Office.js)│  │
-│  │  app.getcasus.com   │  │  Taskpane inside MS Word      │  │
-│  └────────┬────────────┘  └────────────┬─────────────────┘  │
-│           │                            │                     │
-│           └──────────┬─────────────────┘                     │
-│                      ▼                                       │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  BACKEND (Node.js + TypeScript) — GCP Switzerland       │ │
-│  │                                                          │ │
-│  │  ┌──────────┐  ┌──────────────┐  ┌──────────────────┐  │ │
-│  │  │ API      │→ │ Prompt       │→ │ Output Validator  │  │ │
-│  │  │ Routes   │  │ Engine       │  │ (Zod schemas)     │  │ │
-│  │  └──────────┘  └──────┬───────┘  └──────────────────┘  │ │
-│  │                       ▼                                  │ │
-│  │  ┌─────────────────────────────────────────────────┐    │ │
-│  │  │  Azure OpenAI (EU Region)                        │    │ │
-│  │  │  GPT-4o / GPT-4 Turbo | Zero data retention     │    │ │
-│  │  │  Abuse monitoring DISABLED                       │    │ │
-│  │  └─────────────────────────────────────────────────┘    │ │
-│  │                                                          │ │
-│  │  ┌─────────────────────────────────────────────────┐    │ │
-│  │  │  Firestore (NoSQL) + Cloud Storage — GCP CH      │    │ │
-│  │  │  Users, documents, results, playbooks, history   │    │ │
-│  │  └─────────────────────────────────────────────────┘    │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+The Word Add-in uses the same backend API but reads document text directly from Word via `Office.js`:
+- `Word.run()` + `body.load("text")` + `context.sync()` — read document
+- `body.search()` + `select()` — navigate to flagged clauses
+- `insertText(fix, Word.InsertLocation.replace)` — apply fixes (auto-creates Track Changes redlines)
+- `insertContentControl()` + `font.highlightColor` — highlight deviations with severity colors
+- All highlights are batched into a single `Word.run` transaction to minimize round-trips
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check, shows mock/real mode |
+| GET | `/api/playbooks` | List available playbooks |
+| POST | `/api/benchmark` | Run benchmark analysis |
+
+### POST `/api/benchmark`
+
+**Request:**
+```json
+{
+  "documentText": "MUTUAL NON-DISCLOSURE AGREEMENT...",
+  "playbook": "nda-standard"
+}
 ```
 
----
+**Response:**
+```json
+{
+  "alignmentScore": 25,
+  "totalClauses": 8,
+  "playbook": "NDA Standard",
+  "summary": "The contract significantly deviates from the standard...",
+  "deviations": [
+    {
+      "clauseTitle": "Definition of Confidential Information",
+      "documentExcerpt": "Confidential Information shall mean any proprietary data...",
+      "standardExcerpt": "Confidential Information means any and all non-public information...",
+      "deviationType": "weaker",
+      "severity": "critical",
+      "explanation": "The definition is too narrow...",
+      "suggestedFix": "Replace with: ...",
+      "locationHint": "Confidential Information shall mean any proprietary"
+    }
+  ]
+}
+```
 
-## Key Architectural Insights
+## Environment Variables
 
-1. **No RAG currently** — all features work with single-document context (full document sent in the LLM prompt). RAG is on the roadmap for multi-document features.
-
-2. **Every feature follows the same backend pattern:** validate input → build prompt → call LLM → validate output → return/store.
-
-3. **The Word Add-in talks to the same backend API** as the web app. The only difference is where the document text comes from (Office.js reads it from Word vs. the web app parses a file upload).
-
-4. **Output validation is critical** — in legal tech, you never show unvalidated AI output to a lawyer. Every LLM response is parsed and validated against a Zod schema before returning.
-
-5. **Data residency split** — storage in Switzerland, inference in EU. Document text crosses to Azure EU only for LLM processing, results return to Swiss GCP. Original files never leave Switzerland.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | No | OpenAI API key. Without it, mock mode is used |
+| `OPENAI_MODEL` | No | Model to use (default: `gpt-4o-mini`) |
+| `PORT` | No | Backend port (default: `3001`) |

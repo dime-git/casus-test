@@ -195,18 +195,58 @@ export default function BenchmarkTaskpane() {
       const data = await response.json();
       setResult(data);
 
-      // Step 3: Highlight flagged clauses in the document
-      for (const dev of data.deviations) {
-        if (dev.locationHint && dev.locationHint !== "Not found in document") {
-          const color =
-            dev.severity === "critical"
-              ? "#FECACA"
-              : dev.severity === "major"
-                ? "#FED7AA"
-                : "#FEF9C3";
-          await highlightClause(dev.locationHint, dev.clauseTitle, color);
+      // Step 3: Highlight all flagged clauses in a single Word.run
+      // Batching into one transaction = one context.sync() = fewer round-trips
+      await Word.run(async (context) => {
+        for (const dev of data.deviations) {
+          if (dev.locationHint && dev.locationHint !== "Not found in document") {
+            const color =
+              dev.severity === "critical"
+                ? "#FECACA"
+                : dev.severity === "major"
+                  ? "#FED7AA"
+                  : "#FEF9C3";
+
+            const results = context.document.body.search(dev.locationHint, {
+              matchCase: false,
+            });
+            results.load("items");
+          }
         }
-      }
+
+        // Execute all searches at once
+        await context.sync();
+
+        // Now apply highlights to all found ranges
+        // (We need to re-search since ranges are consumed after sync)
+        for (const dev of data.deviations) {
+          if (dev.locationHint && dev.locationHint !== "Not found in document") {
+            const color =
+              dev.severity === "critical"
+                ? "#FECACA"
+                : dev.severity === "major"
+                  ? "#FED7AA"
+                  : "#FEF9C3";
+
+            const results = context.document.body.search(dev.locationHint, {
+              matchCase: false,
+            });
+            results.load("items");
+            await context.sync();
+
+            if (results.items.length > 0) {
+              const range = results.items[0];
+              const cc = range.insertContentControl();
+              cc.title = dev.clauseTitle;
+              cc.tag = "casus-benchmark";
+              cc.appearance = Word.ContentControlAppearance.boundingBox;
+              range.font.highlightColor = color;
+            }
+          }
+        }
+
+        await context.sync();
+      });
     } finally {
       setLoading(false);
     }

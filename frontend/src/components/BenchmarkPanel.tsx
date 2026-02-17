@@ -4,9 +4,10 @@ import type { PlaybookSummary } from "../types";
 interface Props {
   onRunBenchmark: (playbookId: string) => void;
   loading: boolean;
+  disabled?: boolean;
 }
 
-export default function BenchmarkPanel({ onRunBenchmark, loading }: Props) {
+export default function BenchmarkPanel({ onRunBenchmark, loading, disabled }: Props) {
   const [playbooks, setPlaybooks] = useState<PlaybookSummary[]>([]);
   const [selected, setSelected] = useState<string>("");
 
@@ -55,7 +56,7 @@ export default function BenchmarkPanel({ onRunBenchmark, loading }: Props) {
 
       <button
         onClick={() => selected && onRunBenchmark(selected)}
-        disabled={loading || !selected}
+        disabled={loading || !selected || disabled}
         style={{
           width: "100%", padding: "10px 16px", background: loading ? "#1E2A3A" : "#3B82F6",
           color: "#fff", border: "none", borderRadius: 8, fontSize: 13,

@@ -1,3 +1,4 @@
+import OpenAI from "openai";
 import { PromptPair } from "./promptEngine";
 import { BenchmarkResult, BenchmarkResultSchema } from "../types";
 
@@ -16,6 +17,8 @@ import { BenchmarkResult, BenchmarkResultSchema } from "../types";
  */
 
 const USE_MOCK = !process.env.OPENAI_API_KEY;
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
 
 export async function callLLM(prompt: PromptPair): Promise<string> {
   if (USE_MOCK) {
@@ -23,22 +26,47 @@ export async function callLLM(prompt: PromptPair): Promise<string> {
     return getMockBenchmarkResponse(prompt);
   }
 
-  console.log("[LLM] Calling OpenAI API...");
-
-  const { default: OpenAI } = await import("openai");
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const response = await client.chat.completions.create({
-    model: "gpt-4o",
-    temperature: 0, // deterministic for legal analysis
-    messages: [
-      { role: "system", content: prompt.systemPrompt },
-      { role: "user", content: prompt.userPrompt },
-    ],
-    response_format: { type: "json_object" },
-  });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[LLM] Calling OpenAI API (attempt ${attempt}/${MAX_RETRIES})...`);
 
-  return response.choices[0]?.message?.content || "";
+      const response = await client.chat.completions.create({
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        temperature: 0, // deterministic for legal analysis
+        messages: [
+          { role: "system", content: prompt.systemPrompt },
+          { role: "user", content: prompt.userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error("LLM returned empty response");
+      }
+
+      return content;
+    } catch (err) {
+      const isRateLimit = err instanceof OpenAI.RateLimitError;
+      const isTimeout = err instanceof OpenAI.APIConnectionTimeoutError;
+      const isRetryable = isRateLimit || isTimeout || (err instanceof OpenAI.InternalServerError);
+
+      if (isRetryable && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // exponential backoff: 1s, 2s, 4s
+        console.warn(`[LLM] ${isRateLimit ? "Rate limited" : "API error"} — retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      throw new Error(
+        `LLM API call failed after ${attempt} attempt(s): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  throw new Error("LLM call exhausted all retries");
 }
 
 /**
@@ -48,29 +76,51 @@ export async function callLLM(prompt: PromptPair): Promise<string> {
  * to a lawyer. The validator:
  * 1. Parses the raw LLM string as JSON
  * 2. Validates against the Zod schema
- * 3. Returns typed, safe data — or throws with clear errors
- *
- * In production, this would also handle retries if the LLM returns
- * malformed output (ask for a second attempt with error feedback).
+ * 3. If validation fails, retries the LLM call with error feedback
+ * 4. Returns typed, safe data — or throws with clear errors
  */
-export function validateBenchmarkOutput(raw: string): BenchmarkResult {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`LLM returned invalid JSON: ${raw.substring(0, 200)}...`);
+export async function validateBenchmarkOutput(
+  raw: string,
+  retryFn?: (errorFeedback: string) => Promise<string>
+): Promise<BenchmarkResult> {
+  let currentRaw = raw;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(currentRaw);
+    } catch {
+      if (attempt === 1 && retryFn) {
+        console.warn("[Validator] Invalid JSON from LLM — retrying with error feedback...");
+        currentRaw = await retryFn(
+          `Your previous response was not valid JSON. Return ONLY valid JSON matching the schema. Error: invalid JSON syntax.`
+        );
+        continue;
+      }
+      throw new Error(`LLM returned invalid JSON: ${currentRaw.substring(0, 200)}...`);
+    }
+
+    const result = BenchmarkResultSchema.safeParse(parsed);
+
+    if (!result.success) {
+      const errors = result.error.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; ");
+
+      if (attempt === 1 && retryFn) {
+        console.warn(`[Validator] Schema validation failed — retrying with error feedback: ${errors}`);
+        currentRaw = await retryFn(
+          `Your previous response had validation errors: ${errors}. Fix these issues and return valid JSON matching the required schema.`
+        );
+        continue;
+      }
+      throw new Error(`LLM output failed validation: ${errors}`);
+    }
+
+    return result.data;
   }
 
-  const result = BenchmarkResultSchema.safeParse(parsed);
-
-  if (!result.success) {
-    const errors = result.error.issues
-      .map((i) => `${i.path.join(".")}: ${i.message}`)
-      .join("; ");
-    throw new Error(`LLM output failed validation: ${errors}`);
-  }
-
-  return result.data;
+  throw new Error("Validation exhausted all retries");
 }
 
 function getMockBenchmarkResponse(prompt: PromptPair): string {

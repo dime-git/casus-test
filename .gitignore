@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 .DS_Store
+INTERVIEW_PREP.md
+OFFICE_JS_GUIDE.md
