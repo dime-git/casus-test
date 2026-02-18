@@ -1,7 +1,7 @@
 import { Playbook } from "../types";
 
 /**
- * In production CASUS, playbooks are stored in Firestore per organization.
+ * In production, playbooks are stored in Firestore per organization.
  * Each law firm uploads their own standards. Here we hardcode two examples.
  */
 export const PLAYBOOKS: Record<string, Playbook> = {
@@ -105,10 +105,12 @@ export const PLAYBOOKS: Record<string, Playbook> = {
   },
 };
 
+// Returns a playbook object by its id, or undefined if not found
 export function getPlaybook(id: string): Playbook | undefined {
   return PLAYBOOKS[id];
 }
 
+// Lists all available playbooks with their id, name, description, and the number of clauses
 export function listPlaybooks(): Array<{ id: string; name: string; description: string; clauseCount: number }> {
   return Object.values(PLAYBOOKS).map((p) => ({
     id: p.id,

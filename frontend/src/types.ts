@@ -23,3 +23,35 @@ export interface PlaybookSummary {
   description: string;
   clauseCount: number;
 }
+
+// ──────────────────────────────────────────
+// Review Types
+// ──────────────────────────────────────────
+
+export interface RiskFinding {
+  title: string;
+  riskCategory:
+    | "liability"
+    | "termination"
+    | "intellectual_property"
+    | "confidentiality"
+    | "payment"
+    | "data_protection"
+    | "governing_law"
+    | "indemnification"
+    | "non_compete"
+    | "general";
+  severity: "critical" | "major" | "minor" | "info";
+  documentExcerpt: string;
+  explanation: string;
+  suggestedAlternative?: string;
+  locationHint: string;
+}
+
+export interface ReviewResult {
+  riskScore: number;
+  totalFindings: number;
+  findings: RiskFinding[];
+  summary: string;
+  documentType: string;
+}

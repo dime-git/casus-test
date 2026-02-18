@@ -2,7 +2,10 @@ import { useState, useRef, useCallback } from "react";
 import mammoth from "mammoth";
 import BenchmarkPanel from "./components/BenchmarkPanel";
 import BenchmarkResults from "./components/BenchmarkResults";
-import type { BenchmarkResult } from "./types";
+import ReviewResults from "./components/ReviewResults";
+import type { BenchmarkResult, ReviewResult } from "./types";
+
+type Feature = "benchmark" | "review";
 
 interface UploadedFile {
   name: string;
@@ -31,7 +34,9 @@ async function extractText(file: File): Promise<string> {
 export default function App() {
   const [documentText, setDocumentText] = useState("");
   const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null);
+  const [activeFeature, setActiveFeature] = useState<Feature>("benchmark");
   const [result, setResult] = useState<BenchmarkResult | null>(null);
+  const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -87,6 +92,7 @@ export default function App() {
     setDocumentText("");
     setUploadedFile(null);
     setResult(null);
+    setReviewResult(null);
     setError(null);
     setShowPasteArea(false);
     setPasteText("");
@@ -112,6 +118,32 @@ export default function App() {
 
       const data: BenchmarkResult = await res.json();
       setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReview = async () => {
+    setLoading(true);
+    setError(null);
+    setReviewResult(null);
+
+    try {
+      const res = await fetch("http://localhost:3001/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentText }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || err.error || "Review failed");
+      }
+
+      const data: ReviewResult = await res.json();
+      setReviewResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -476,7 +508,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Right: Benchmark Panel + Results */}
+        {/* Right: Feature Panel + Results */}
         <div
           style={{
             width: 480,
@@ -485,12 +517,97 @@ export default function App() {
             background: "rgba(0,0,0,0.15)",
           }}
         >
-          <BenchmarkPanel
-            onRunBenchmark={handleBenchmark}
-            loading={loading}
-            disabled={!hasDocument}
-          />
+          {/* Feature Tabs */}
+          <div
+            style={{
+              display: "flex",
+              borderBottom: "1px solid #1E2A3A",
+            }}
+          >
+            {(
+              [
+                { id: "benchmark" as Feature, label: "Benchmark" },
+                { id: "review" as Feature, label: "Review" },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveFeature(tab.id)}
+                style={{
+                  flex: 1,
+                  padding: "12px 16px",
+                  background:
+                    activeFeature === tab.id
+                      ? "rgba(59,130,246,0.08)"
+                      : "transparent",
+                  color:
+                    activeFeature === tab.id ? "#3B82F6" : "#64748B",
+                  border: "none",
+                  borderBottom:
+                    activeFeature === tab.id
+                      ? "2px solid #3B82F6"
+                      : "2px solid transparent",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  letterSpacing: "0.3px",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
+          {/* Feature-specific panel */}
+          {activeFeature === "benchmark" ? (
+            <BenchmarkPanel
+              onRunBenchmark={handleBenchmark}
+              loading={loading}
+              disabled={!hasDocument}
+            />
+          ) : (
+            <div
+              style={{
+                padding: "16px 20px",
+                borderBottom: "1px solid #1E2A3A",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#64748B",
+                  lineHeight: 1.5,
+                  marginBottom: 12,
+                }}
+              >
+                Identify risks, red flags, and weaknesses in your contract.
+                No playbook needed — works on any document.
+              </div>
+              <button
+                onClick={handleReview}
+                disabled={loading || !hasDocument}
+                style={{
+                  width: "100%",
+                  padding: "10px 16px",
+                  background:
+                    loading ? "#1E2A3A" : "#8B5CF6",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: loading ? "wait" : "pointer",
+                  transition: "all 0.2s",
+                  opacity: loading || !hasDocument ? 0.7 : 1,
+                }}
+              >
+                {loading ? "Analyzing..." : "Run Risk Review"}
+              </button>
+            </div>
+          )}
+
+          {/* Error */}
           {error && (
             <div
               style={{
@@ -507,37 +624,57 @@ export default function App() {
             </div>
           )}
 
-          {result && <BenchmarkResults result={result} />}
+          {/* Results — show the active feature's results */}
+          {activeFeature === "benchmark" && result && (
+            <BenchmarkResults result={result} />
+          )}
+          {activeFeature === "review" && reviewResult && (
+            <ReviewResults result={reviewResult} />
+          )}
 
-          {!result && !loading && !error && (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 32,
-              }}
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 40, marginBottom: 16, opacity: 0.5 }}>
-                  &#128202;
-                </div>
-                <div
-                  style={{
-                    fontSize: 14,
-                    color: "#64748B",
-                    lineHeight: 1.6,
-                    maxWidth: 280,
-                  }}
-                >
-                  {hasDocument
-                    ? "Select a playbook and run benchmark to analyze your document."
-                    : "Upload a contract document to get started."}
+          {/* Empty state */}
+          {((activeFeature === "benchmark" && !result) ||
+            (activeFeature === "review" && !reviewResult)) &&
+            !loading &&
+            !error && (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 32,
+                }}
+              >
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      fontSize: 40,
+                      marginBottom: 16,
+                      opacity: 0.5,
+                    }}
+                  >
+                    {activeFeature === "benchmark"
+                      ? "\u{1F4CA}"
+                      : "\u{1F6E1}"}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: "#64748B",
+                      lineHeight: 1.6,
+                      maxWidth: 280,
+                    }}
+                  >
+                    {!hasDocument
+                      ? "Upload a contract document to get started."
+                      : activeFeature === "benchmark"
+                        ? "Select a playbook and run benchmark to analyze your document."
+                        : "Click Run Risk Review to identify risks and weaknesses."}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
       </div>
     </div>
